@@ -6,7 +6,7 @@ This repository contains my MSc project from Brunel University London, where I i
 
 ## 🧠 Project Overview
 
-The objective is to classify individuals into **Low**, **Medium**, or **High** risk levels based on demographic, financial, and behavioural data. The original dataset contains 15,000 records and was obtained from [Kaggle](https://www.kaggle.com/datasets).
+The objective is to classify individuals into **Low**, **Medium**, or **High** risk levels based on demographic, financial, and behavioural data. The original dataset contains 15,000 records and was obtained from [Kaggle](https://www.kaggle.com/datasets/preethamgouda/financial-risk).
 
 ---
 
