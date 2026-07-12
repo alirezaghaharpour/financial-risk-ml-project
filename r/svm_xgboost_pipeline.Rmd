@@ -1,15 +1,32 @@
 ---
-title: "DDA"
+title: "Financial Risk Classification Using SVM and XGBoost"
 author: "Alireza Ghaharpour"
 date: "2025-05-01"
-output: html_document
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
+## Project Overview
 
-# 0. Instructions 
+This project investigates multiclass financial-risk classification using
+Support Vector Machines and XGBoost.
+
+The workflow includes data-quality assessment, missing-value treatment,
+exploratory data analysis, class-imbalance handling with SMOTE, model
+training, hyperparameter tuning and performance evaluation.
+
+The project was originally developed as part of the MSc Data Science and
+Analytics programme at Brunel University London and was subsequently
+reorganised for portfolio presentation.
+
+
+# Setup and Dependencies
 
 ```{r}
 # Check and install missing packages one by one
@@ -47,8 +64,6 @@ if (!require("UBL")) {
 ```
 
 ```{r}
-# Add code here to load all the required libraries with `library()`.  
-# Do not include any `install.package()` for any required packages in this rmd file.
 library(dplyr)
 library(ggplot2)
 library(validate)
@@ -93,7 +108,7 @@ MinMax <- function(x) {
 ## 1.1 Data quality plan
 ```{r}
 # Load the dataset
-financial_df <- read.csv('financial_risk_assessment.csv')
+financial_df <- read.csv("../data/financial_risk_assessment.csv")
 
 # Get the structure of the dataset (data types and first few rows of each column)
 str(financial_df) 
