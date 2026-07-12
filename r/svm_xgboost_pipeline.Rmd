@@ -1,0 +1,1202 @@
+---
+title: "DDA"
+author: "Alireza Ghaharpour"
+date: "2025-05-01"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 0. Instructions 
+
+```{r}
+# Check and install missing packages one by one
+
+if (!require("dplyr")) install.packages("dplyr", dependencies = TRUE)
+if (!require("ggplot2")) install.packages("ggplot2", dependencies = TRUE)
+if (!require("validate")) install.packages("validate", dependencies = TRUE)
+if (!require("tidyverse")) install.packages("tidyverse", dependencies = TRUE)
+if (!require("Hmisc")) install.packages("Hmisc", dependencies = TRUE)
+if (!require("psych")) install.packages("psych", dependencies = TRUE)
+if (!require("e1071")) install.packages("e1071", dependencies = TRUE)
+if (!require("VIM")) install.packages("VIM", dependencies = TRUE)
+if (!require("corrplot")) install.packages("corrplot", dependencies = TRUE)
+if (!require("RColorBrewer")) install.packages("RColorBrewer", dependencies = TRUE)
+if (!require("caret")) install.packages("caret", dependencies = TRUE)
+if (!require("plotly")) install.packages("plotly", dependencies = TRUE)
+if (!require("cluster")) install.packages("cluster", dependencies = TRUE)
+if (!require("stats")) install.packages("stats", dependencies = TRUE)
+if (!require("tree")) install.packages("tree", dependencies = TRUE)
+if (!require("randomForest")) install.packages("randomForest", dependencies = TRUE)
+if (!require("kernlab")) install.packages("kernlab", dependencies = TRUE)
+if (!require("class")) install.packages("class", dependencies = TRUE)
+if (!require("smotefamily")) install.packages("smotefamily", dependencies = TRUE)
+if (!require("MLmetrics")) install.packages("MLmetrics", dependencies = TRUE)
+if (!require("ROCR")) install.packages("ROCR", dependencies = TRUE)
+if (!require("xgboost")) install.packages("xgboost", dependencies = TRUE)
+if (!require("Metrics")) install.packages("Metrics", dependencies = TRUE)
+
+# Special case: install UBL from GitHub if not already installed
+if (!require("UBL")) {
+  if (!require("devtools")) install.packages("devtools", dependencies = TRUE)
+  devtools::install_github("paobranco/UBL")
+}
+
+```
+
+```{r}
+# Add code here to load all the required libraries with `library()`.  
+# Do not include any `install.package()` for any required packages in this rmd file.
+library(dplyr)
+library(ggplot2)
+library(validate)
+library(tidyverse)
+library(Hmisc)
+library(psych)
+library(e1071)
+library(VIM)
+library(corrplot)
+library(RColorBrewer)
+library(caret)
+library(plotly)
+library(cluster)
+library(stats)
+library(tree)
+library(randomForest)
+library(kernlab)
+library(class)
+library(smotefamily)
+library(MLmetrics)
+library(ROCR)
+library(xgboost)
+library(UBL)
+library(Metrics)
+
+
+```
+## Function
+```{r}
+MinMax <- function(x) {
+  if (is.numeric(x) && length(unique(x)) > 1) {
+    return((x - min(x)) / (max(x) - min(x)))
+  } else {
+    return(x)
+  }
+}
+```
+
+
+# 1. Organise and clean the data
+
+## 1.1 Data quality plan
+```{r}
+# Load the dataset
+financial_df <- read.csv('financial_risk_assessment.csv')
+
+# Get the structure of the dataset (data types and first few rows of each column)
+str(financial_df) 
+
+# Get summary statistics for all variables in the dataset
+summary(financial_df) 
+
+# Gender Encoding
+financial_df$Gender <- as.factor(financial_df$Gender)
+
+# Education Level Encoding
+financial_df$Education.Level <- as.factor(financial_df$Education.Level)
+
+# Marital Status Encoding
+financial_df$Marital.Status <- as.factor(financial_df$Marital.Status)
+
+# Loan Purpose Encoding
+financial_df$Loan.Purpose <- as.factor(financial_df$Loan.Purpose)
+
+# Employment Status Encoding
+financial_df$Employment.Status <- as.factor(financial_df$Employment.Status)
+
+# Payment History Encoding
+financial_df$Payment.History <- as.factor(financial_df$Payment.History)
+
+# Risk Rating Encoding
+financial_df$Risk.Rating <- as.factor(financial_df$Risk.Rating)
+
+```
+Our dataset consists of 20 variables (columns) and 15,000 rows (attributes).
+
+The dataset contains two types of variables:
+
+. Numerical variables: Age, Income, Credit Score, Loan Amount, Years at Current Job, Debt-to-Income Ratio, Assets Value, Number of Dependents, Previous Defaults, Marital Status Change.
+
+. Categorical variables: Gender, Education Level, Marital Status, Loan Purpose, Employment Status, Payment History, City, State, Country, Risk Rating.
+
+
+## 1.2 Data quality findings
+```{r}
+# Check for missing values in each column
+colSums(is.na(financial_df))
+
+sum(duplicated(financial_df))
+
+# Frequency tables for categorical variables
+
+table(financial_df$Gender)
+table(financial_df$Education.Level)
+table(financial_df$Marital.Status)
+table(financial_df$Loan.Purpose)
+table(financial_df$Employment.Status)
+table(financial_df$Payment.History)
+#table(financial_df$City)
+#table(financial_df$State)
+#table(financial_df$Country)
+table(financial_df$Risk.Rating)
+
+
+```
+
+
+There are no missing values in the categorical variables, and they appear to be correctly formatted. However, some numerical columns contain missing values (NA’s), affecting approximately 15% of the dataset. These missing values need to be cleaned before further analysis.
+
+## 1.3 Data cleaning
+
+
+According to "COMPARISON OF SIMPLE MISSING DATA IMPUTATION TECHNIQUES FOR NUMERICAL AND CATEGORICAL DATASETS" Article, When less than 20% of data is missing, mean and median imputations are effective in regression problems. kNN imputation is better at 20% missingness and significantly better when 50% or more data is missing. so 2250 form 15000 observation are missing so it is less than 20% of data and we use mean or median imputation
+
+### 1.3.1 Remove location based variables
+
+```{r}
+financial_df_cleaned <- financial_df[, !(names(financial_df) %in% c('City' , 'State', 'Country'))]
+str(financial_df_cleaned)
+```
+### 1.3.2 Remove NA's
+
+```{r}
+##############Distribution of Income
+# More complete histogram with density curve
+hist(financial_df_cleaned$Income, 
+     breaks=60, 
+     probability=TRUE, 
+     col="lightblue",
+     main="Distribution of Income",
+     xlab="Income")
+lines(density(financial_df_cleaned$Income,na.rm = TRUE), col="red", lwd=2)
+
+# Add mean line
+abline(v=mean(financial_df_cleaned$Income, na.rm=TRUE), 
+       col="darkblue", lwd=2, lty=2)
+
+# Add median line
+abline(v=median(financial_df_cleaned$Income, na.rm=TRUE), 
+       col="darkgreen", lwd=2, lty=3)
+
+
+# Check the skewness of Income in Numbers
+skewness(financial_df_cleaned$Income, na.rm = TRUE)
+
+
+##############Distribution of Credit.Score
+# More complete histogram with density curve
+hist(financial_df_cleaned$Credit.Score, 
+     breaks=20, 
+     probability=TRUE, 
+     col="lightblue",
+     main="Distribution of Credit.Score",
+     xlab="Credit.Score")
+lines(density(financial_df_cleaned$Credit.Score,na.rm = TRUE), col="red", lwd=2)
+
+# Add mean line
+abline(v=mean(financial_df_cleaned$Credit.Score, na.rm=TRUE), 
+       col="darkblue", lwd=2, lty=2)
+
+# Add median line
+abline(v=median(financial_df_cleaned$Credit.Score, na.rm=TRUE), 
+       col="darkgreen", lwd=2, lty=3)
+
+
+# Check the skewness of Credit.Score in Numbers
+skewness(financial_df_cleaned$Credit.Score, na.rm = TRUE)
+
+
+##############Distribution of Loan.Amount
+# More complete histogram with density curve
+hist(financial_df_cleaned$Loan.Amount, 
+     breaks=20, 
+     probability=TRUE, 
+     col="lightblue",
+     main="Distribution of Loan.Amount",
+     xlab="Loan.Amount")
+lines(density(financial_df_cleaned$Loan.Amount,na.rm = TRUE), col="red", lwd=2)
+
+# Add mean line
+abline(v=mean(financial_df_cleaned$Loan.Amount, na.rm=TRUE), 
+       col="darkblue", lwd=2, lty=2)
+
+# Add median line
+abline(v=median(financial_df_cleaned$Loan.Amount, na.rm=TRUE), 
+       col="darkgreen", lwd=2, lty=3)
+
+# Check the skewness of Loan.Amount in Numbers
+skewness(financial_df_cleaned$Loan.Amount, na.rm = TRUE)
+
+
+##############Distribution of Assets.Value
+# More complete histogram with density curve
+hist(financial_df_cleaned$Assets.Value, 
+     breaks=20, 
+     probability=TRUE, 
+     col="lightblue",
+     main="Distribution of Assets.Value",
+     xlab="Assets.Value")
+lines(density(financial_df_cleaned$Assets.Value,na.rm = TRUE), col="red", lwd=2)
+
+# Add mean line
+abline(v=mean(financial_df_cleaned$Assets.Value, na.rm=TRUE), 
+       col="darkblue", lwd=2, lty=2)
+
+# Add median line
+abline(v=median(financial_df_cleaned$Assets.Value, na.rm=TRUE), 
+       col="darkgreen", lwd=2, lty=3)
+
+# Check the skewness of Assets.Value in Numbers
+skewness(financial_df_cleaned$Assets.Value, na.rm = TRUE)
+
+
+```
+
+
+Since all distributions are not skewed, Mean Imputation is recommended. If the distributions were skewed, Median Imputation would have been a better option.
+
+
+```{r}
+# Impute missing values with the mean for continuous variables
+financial_df_cleaned$Income[is.na(financial_df_cleaned$Income)] <- mean(financial_df_cleaned$Income, na.rm = TRUE)
+
+financial_df_cleaned$Credit.Score[is.na(financial_df_cleaned$Credit.Score)] <- mean(financial_df_cleaned$Credit.Score, na.rm = TRUE)
+
+financial_df_cleaned$Loan.Amount[is.na(financial_df_cleaned$Loan.Amount)] <- mean(financial_df_cleaned$Loan.Amount, na.rm = TRUE)
+
+financial_df_cleaned$Assets.Value[is.na(financial_df_cleaned$Assets.Value)] <- mean(financial_df_cleaned$Assets.Value, na.rm = TRUE)
+
+```
+
+```{r}
+financial_df_cleaned <- kNN(financial_df_cleaned, variable = c('Previous.Defaults', 'Number.of.Dependents'), k=5)
+
+# Remove the _imp indicator columns
+financial_df_cleaned <- financial_df_cleaned[, !grepl("_imp", names(financial_df_cleaned))]
+
+# Display summary statistics after imputation
+str(financial_df_cleaned) 
+
+colSums(is.na(financial_df_cleaned))
+
+```
+
+# 2. EDA
+
+## 2.1 Graphical Analysis
+```{r}
+
+# Selecting only numerical columns for Linear corrleation
+numeric_df <- financial_df_cleaned[, sapply(financial_df_cleaned, is.numeric)]
+
+# Creating a correlation matrix and scatterplot matrix
+psych::pairs.panels(numeric_df, 
+                    method = "pearson",  # Correlation method
+                    hist.col = "lightblue",  # Histogram color
+                    density = TRUE,  # Show density plot
+                    ellipses = TRUE,  # Confidence ellipses
+                    pch = 21, bg = "lightgray")  # Point style
+
+```
+
+```{r}
+# Convert Risk Rating to numeric for Spearman correlation 
+risk_numeric <- as.numeric(financial_df_cleaned$Risk.Rating)
+# Compute Spearman correlation between Risk Rating and all numeric variables
+Risk_correlations <- sapply(numeric_df, function(x){
+  cor(risk_numeric, x, method = "spearman", use = "complete.obs")
+})
+# Create a data frame from the correlation results
+corr_df <- data.frame(Variable = names(Risk_correlations), spearman_correlation = round(Risk_correlations, 3))
+# Set scale limits for heatmap
+min_val <- min(corr_df$spearman_correlation)
+max_val <- max(corr_df$spearman_correlation)
+#Plot Heatmap to show the correlations
+ggplot(corr_df, aes(x = reorder(Variable, spearman_correlation),
+                    y = "Risk Rating",fill = spearman_correlation)) +
+  geom_tile(color = "white") +
+  geom_text(aes(label = round(spearman_correlation, 2)),color = "black", size = 4, fontface = "bold") +
+  scale_fill_gradient2(low = "yellow", mid = "blue", high = "orange",
+                       midpoint = 0, limits = c(min_val, max_val),name = "Spearman\nCorrelation") +
+  labs(title = "Correlation of Risk Rating with Numerical Features",x = "Variables", y = "") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"),plot.title = element_text(face = "bold", hjust = 0.5))
+```
+
+
+```{r}
+numeric_vars <- c("Age", "Income", "Credit.Score", "Loan.Amount", "Years.at.Current.Job", 
+                  "Debt.to.Income.Ratio", "Assets.Value", "Number.of.Dependents", "Previous.Defaults", "Marital.Status.Change")
+
+
+for (var in numeric_vars) {
+  print(
+    ggplot(financial_df_cleaned, aes(x=Risk.Rating, y=.data[[var]], fill=Risk.Rating)) +
+      geom_boxplot() +
+      theme_minimal() +
+      labs(title=paste("Boxplot of", var, "by Risk Rating"), 
+           x="Risk Rating", y=var)
+  )
+}
+
+
+
+```
+
+## 2.2 Unsupervised Learning Method
+
+### 2.2.1 PCA 
+```{r}
+# Create dummy encoder for all predictors (excluding target)
+dummies <- dummyVars(~ ., data = financial_df_cleaned[, names(financial_df_cleaned) != "Risk.Rating"])
+
+# Apply transformation
+financial_encoded <- predict(dummies, newdata = financial_df_cleaned)
+
+# Convert to dataframe
+financial_encoded_df <- as.data.frame(financial_encoded)
+
+#Standardizing the data so that all variables contribute equally.
+scaled_df <- scale(financial_encoded_df)
+
+#Apply PCA
+pca_result <- prcomp(scaled_df, center = TRUE, scale. = TRUE)
+
+# View summary of PCA
+summary(pca_result)
+
+###  calculate the proportion of explained variance (PEV) from the std values
+pca_variance <- pca_result$sdev^2
+pca_var_percent <- round(pca_variance / sum(pca_variance) * 100, 1)
+
+barplot(pca_var_percent,
+        names.arg = paste0("PC", 1:length(pca_var_percent)),
+        main = "Explained Variance by Principal Component",
+        xlab = "Principal Components", ylab = "Variance Explained (%)",
+        col = "lightblue")
+
+###  plot the cumulative PEV
+{
+plot(cumsum(pca_var_percent), type = "b", pch = 19,
+     xlab = "Number of Principal Components",
+     ylab = "Cumulative Variance Explained (%)",
+     main = "Cumulative Explained Variance")
+abline(h = 80, col = "red", lty = 2)  # Optional: line at 80%
+}
+
+#Plot PC1 Loadings 
+pca1_loadings <- pca_result$rotation[, 1]
+variable <- rownames(pca_result$rotation)
+
+# Create a dataframe
+loadings_df <- data.frame(
+  Variables = variable,
+  Loading = pca1_loadings,
+  Label = variable
+)
+
+p <- ggplot(loadings_df, aes(x = reorder(Label, Loading), y = Loading,
+                             text = paste(Variables, "<br>Loading:", round(Loading, 3)))) +
+  geom_col(fill = "red") +
+  labs(title = "PC1 Loadings",x = "PC1",y = "Loadings Value") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, face = "bold"))
+
+#add message on hover when user hover on the bar it sees message shows variable name and loading value by using ggplotly library 
+interactive_plot <- ggplotly(p, tooltip = "text")
+interactive_plot
+```
+### 2.2.2 Hierarchical Clustering
+
+```{r}
+###  hierarchical clustering - complete linkage
+###   note: exclude the Risk Rating
+dist_financial_clean <- dist(financial_encoded_df, method = 'euclidian')
+hc_financial_clean <- hclust(dist_financial_clean, method = 'complete')
+### 2.2 plot the associated dendrogram
+plot(hc_financial_clean, hang = -0.1, labels = financial_df_cleaned$Risk.Rating)
+
+### 2.3 select a partition containing 3 groups
+hc_cluster_id_financial_clean <- cutree(hc_financial_clean, k = 3)
+### 2.4 k-means with 3 groups
+k_financial_clean = kmeans(financial_encoded_df, 3)
+k_cluster_id_financial_clean <- k_financial_clean$cluster
+```
+
+#### 2.2.2.1 Evaluation of cluster results
+
+
+```{r}
+### 3.1 silhoutte score
+sil_hc_financial_clean <- cluster::silhouette(hc_cluster_id_financial_clean, dist_financial_clean)
+sil_k_financial_clean <- cluster::silhouette(k_cluster_id_financial_clean, dist_financial_clean)
+### 3.2 silhoutte plots
+###   note: use border = 'grey' to be able to see the plot lines
+opar <- par(no.readonly = TRUE)
+par(mfrow = c(2,1))
+plot(sil_hc_financial_clean, border = 'grey')
+plot(sil_k_financial_clean, border = 'grey')
+```
+
+
+K-means appears to be the better clustering method in this case for several reasons:
+
+. Higher average silhouette width (0.45 vs 0.37) - indicating better overall cluster separation and cohesion
+
+. More consistent silhouette widths across clusters (all around 0.45-0.46) - suggesting uniform quality of clustering
+
+. The lowest silhouette width in K-means (0.45) is still higher than the average in HC (0.37)
+
+In hierarchical clustering, there's more variability between clusters (0.29 to 0.51), suggesting uneven cluster quality.
+
+
+#3 Supervised learning
+
+
+
+
+## 3.1 Data Separation
+
+```{r}
+# set random seed
+set.seed(1996)
+# create a 70/30 training/test set split
+n_rows <- nrow(financial_df_cleaned)
+# sample 70% (n_rows * 0.7) indices in the ranges 1:nrows
+training_idx <- sample(n_rows, n_rows * 0.7)
+# filter the data frame with the training indices (and the complement)
+training_financial <- financial_df_cleaned[training_idx,]
+test_financial <- financial_df_cleaned[-training_idx,]
+```
+
+
+
+## 3.1 SVM
+
+### 3.1.1 SVM Pure
+
+```{r}
+
+svm_formula <- reformulate(names(training_financial[, -17]), response = "Risk.Rating")
+
+svm_model <- ksvm(svm_formula, data = training_financial, kernel = "rbfdot", C = 1)
+svm_pred <- predict(svm_model, test_financial[, -17])
+
+confusionMatrix(svm_pred, test_financial$Risk.Rating)
+
+```
+
+###3.1.2 SVM with Clustering
+```{r}
+# Step 1: Add cluster labels to the data
+financial_df_clustered <- cbind(financial_df_cleaned, Cluster = as.factor(k_cluster_id_financial_clean))
+
+# Step 2: Train-Test Split (as before, assuming train-test index is already prepared)
+training_financial_clustered <- financial_df_clustered[training_idx, ]
+test_financial_clustered <- financial_df_clustered[-training_idx, ]
+
+# Step 3: Create formula for SVM
+financial_data_formula_clustered <- reformulate(names(training_financial_clustered[, -17]), response = 'Risk.Rating')
+
+# Step 4: Train SVM with linear and RBF kernels
+rbf_svm_clustered <- ksvm(financial_data_formula_clustered, data = training_financial_clustered, kernel = 'rbfdot', C = 1)
+
+# Step 5: Predict on the test data
+rbf_svm_clustered_pred <- predict(rbf_svm_clustered, test_financial_clustered[,-17])
+
+# Step 6: Confusion Matrix
+confusionMatrix(rbf_svm_clustered_pred, test_financial_clustered$Risk.Rating)
+
+```
+
+###3.1.3 SVM One SMOTE and UnderSampling
+
+```{r}
+# Step 1: Combine features and label
+df_knn3 <- cbind(Risk.Rating = financial_df_cleaned$Risk.Rating, financial_encoded_df)
+
+# Step 2: Convert label to factor and integer for SMOTE
+df_knn3$Risk.Rating <- as.factor(df_knn3$Risk.Rating)
+df_knn3$Risk.Rating <- as.integer(df_knn3$Risk.Rating)  # SMOTE نیاز به عددی داره
+
+# Step 3: Apply SMOTE
+smote_result3 <- SMOTE(X = df_knn3[,-1], target = df_knn3$Risk.Rating, K = 5 , dup_size = 2)
+
+# Step 4: Extract data
+df_balanced_smote3 <- smote_result3$data
+colnames(df_balanced_smote3)[ncol(df_balanced_smote3)] <- "Risk.Rating"
+df_balanced_smote3$Risk.Rating <- factor(df_balanced_smote3$Risk.Rating,
+                                        labels = levels(financial_df_cleaned$Risk.Rating))
+
+table(df_balanced_smote3$Risk.Rating)
+
+# undersample
+
+df_balanced_undersampled <- df_balanced_smote3 %>%
+  group_by(Risk.Rating) %>%
+  slice_sample(n = 4500) %>%
+  ungroup()
+
+table(df_balanced_undersampled$Risk.Rating)
+
+# Step 5: Normalize (optional)
+df_balanced_undersampled[,-ncol(df_balanced_undersampled)] <- as.data.frame(lapply(df_balanced_undersampled[,-ncol(df_balanced_undersampled)], MinMax))
+
+# Step 6: Train/Test split
+train_idx <- sample(nrow(df_balanced_undersampled), 0.7 * nrow(df_balanced_undersampled))
+train_data <- df_balanced_undersampled[train_idx, ]
+test_data <- df_balanced_undersampled[-train_idx, ]
+
+# Step 7: SVM
+
+names(train_data) <- make.names(names(train_data))
+names(test_data) <- make.names(names(test_data))
+svm_formula <- reformulate(names(train_data[,-ncol(train_data)]), response = "Risk.Rating")
+
+svm_model_rbf <- ksvm(svm_formula, data = train_data, kernel = "rbfdot", C = 1)
+svm_pred <- predict(svm_model_rbf, test_data[,-ncol(test_data)])
+
+# Step 8: Confusion Matrix
+
+confusionMatrix(svm_pred, test_data$Risk.Rating)
+
+
+svm_pred <- factor(svm_pred, levels = levels(test_data$Risk.Rating))
+truth <- test_data$Risk.Rating
+
+# List of classes
+classes <- levels(truth)
+
+# Compute precision, recall, and F1 score for each class
+for (cls in classes) {
+  cat(paste0("\nClass: ", cls, "\n"))
+  precision <- Precision(y_pred = svm_pred, y_true = truth, positive = cls)
+  recall <- Recall(y_pred = svm_pred, y_true = truth, positive = cls)
+  f1 <- F1_Score(y_pred = svm_pred, y_true = truth, positive = cls)
+  
+  cat(paste("  Precision:", round(precision, 4), "\n"))
+  cat(paste("  Recall:   ", round(recall, 4), "\n"))
+  cat(paste("  F1 Score: ", round(f1, 4), "\n"))
+}
+
+
+```
+
+
+Show ROC Curve
+
+
+```{r}
+train_data$Risk.Rating <- as.factor(train_data$Risk.Rating)
+test_data$Risk.Rating  <- as.factor(test_data$Risk.Rating)
+
+svm_model_rbf_prob <- ksvm(
+  svm_formula,
+  data = train_data,
+  kernel = "rbfdot",
+  C = 1,
+  prob.model = TRUE
+)
+
+# Use model.frame to ensure feature compatibility with the model
+test_features <- model.frame(svm_formula, data = test_data)
+
+# Get probability matrix for each class
+svm_prob <- predict(svm_model_rbf_prob, newdata = test_features, type = "probabilities")
+
+# Initial check
+head(svm_prob)
+
+true_labels <- test_data$Risk.Rating
+classes <- levels(true_labels)
+colors <- c("red", "blue", "darkgreen")
+
+# Start plotting
+plot(NULL, xlim = c(0,1), ylim = c(0,1), xlab = "False Positive Rate", ylab = "True Positive Rate",
+     main = "SVM ROC Curve - SMOTE - UnderSampling")
+
+# Draw ROC curve for each class
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  
+  # Create prediction and performance objects for class i
+  pred <- prediction(predictions = svm_prob[, cls], labels = as.numeric(true_labels == cls))
+  perf <- performance(pred, "tpr", "fpr")
+  
+  plot(perf, add = TRUE, col = colors[i], lwd = 2)
+}
+
+abline(a = 0, b = 1, col = "gray", lty = 2)
+legend("bottomright", legend = classes, col = colors, lty = 1, lwd = 2, bty = "n")
+
+
+```
+
+
+###3.1.4 SVM 2SMOTE
+
+```{r}
+
+# Step 1: Combine features and label
+df_knn <- cbind(Risk.Rating = financial_df_cleaned$Risk.Rating, financial_encoded_df)
+
+# Step 2: Convert label to factor and integer for SMOTE
+df_knn$Risk.Rating <- as.factor(df_knn$Risk.Rating)
+df_knn$Risk.Rating <- as.integer(df_knn$Risk.Rating)  # SMOTE requires numeric target
+
+# Step 3: Apply SMOTE
+smote_result <- SMOTE(X = df_knn[,-1], target = df_knn$Risk.Rating, K = 5 , dup_size = 5)
+
+# Step 4: Extract data
+df_balanced_smote <- smote_result$data
+colnames(df_balanced_smote)[ncol(df_balanced_smote)] <- "Risk.Rating"
+df_balanced_smote$Risk.Rating <- factor(df_balanced_smote$Risk.Rating,
+                                        labels = levels(financial_df_cleaned$Risk.Rating))
+
+# Convert label to integer again (required for SMOTE)
+df_balanced_smote$Risk.Rating <- as.integer(df_balanced_smote$Risk.Rating)
+
+# Apply second round of SMOTE on the previously SMOTE-balanced dataset
+smote_result_2 <- SMOTE(X = df_balanced_smote[,-ncol(df_balanced_smote)],
+                        target = df_balanced_smote$Risk.Rating,
+                        K = 5,
+                        dup_size = 1)
+
+# Prepare final output
+df_balanced_smote_2 <- smote_result_2$data
+colnames(df_balanced_smote_2)[ncol(df_balanced_smote_2)] <- "Risk.Rating"
+
+# Convert label back to factor with original levels
+df_balanced_smote_2$Risk.Rating <- factor(df_balanced_smote_2$Risk.Rating,
+                                          labels = levels(financial_df_cleaned$Risk.Rating))
+
+# Check final class distribution
+table(df_balanced_smote_2$Risk.Rating)
+
+# Step 5: Normalize (optional)
+df_balanced_smote_2[,-ncol(df_balanced_smote_2)] <- as.data.frame(lapply(df_balanced_smote_2[,-ncol(df_balanced_smote_2)], MinMax))
+
+# Step 6: Train/Test split
+train_idx <- sample(nrow(df_balanced_smote_2), 0.7 * nrow(df_balanced_smote_2))
+train_data <- df_balanced_smote_2[train_idx, ]
+test_data <- df_balanced_smote_2[-train_idx, ]
+
+# Step 7: SVM
+names(train_data) <- make.names(names(train_data))
+names(test_data) <- make.names(names(test_data))
+svm_formula <- reformulate(names(train_data[,-ncol(train_data)]), response = "Risk.Rating")
+
+svm_model_rbf <- ksvm(svm_formula, data = train_data, kernel = "rbfdot", C = 1)
+svm_pred <- predict(svm_model_rbf, test_data[,-ncol(test_data)])
+
+# Step 8: Confusion Matrix
+confusionMatrix(svm_pred, test_data$Risk.Rating)
+
+# Convert to factor with consistent levels
+svm_pred <- factor(svm_pred, levels = levels(test_data$Risk.Rating))
+truth <- test_data$Risk.Rating
+
+# List of classes
+classes <- levels(truth)
+
+# Compute precision, recall, and F1 score for each class
+for (cls in classes) {
+  cat(paste0("\nClass: ", cls, "\n"))
+  precision <- Precision(y_pred = svm_pred, y_true = truth, positive = cls)
+  recall <- Recall(y_pred = svm_pred, y_true = truth, positive = cls)
+  f1 <- F1_Score(y_pred = svm_pred, y_true = truth, positive = cls)
+  
+  cat(paste("  Precision:", round(precision, 4), "\n"))
+  cat(paste("  Recall:   ", round(recall, 4), "\n"))
+  cat(paste("  F1 Score: ", round(f1, 4), "\n"))
+}
+
+
+
+```
+
+Show ROC Curve
+
+
+```{r}
+train_data$Risk.Rating <- as.factor(train_data$Risk.Rating)
+test_data$Risk.Rating  <- as.factor(test_data$Risk.Rating)
+
+# Ensure that the target column is a factor with 3 levels
+levels(train_data$Risk.Rating)
+
+
+svm_model_rbf_prob <- ksvm(
+  svm_formula,
+  data = train_data,
+  kernel = "rbfdot",
+  C = 1,
+  prob.model = TRUE
+)
+
+# Use model.frame to ensure compatibility of columns with the model
+test_features <- model.frame(svm_formula, data = test_data)
+
+# Get the probability matrix for each class
+svm_prob <- predict(svm_model_rbf_prob, newdata = test_features, type = "probabilities")
+
+# Initial check
+head(svm_prob)
+
+true_labels <- test_data$Risk.Rating
+classes <- levels(true_labels)
+colors <- c("red", "blue", "darkgreen")
+
+# Start plot
+plot(NULL, xlim = c(0,1), ylim = c(0,1), xlab = "False Positive Rate", ylab = "True Positive Rate",
+     main = "SVM ROC Curve - 2SMOTE")
+
+# Plot ROC for each class
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  
+  # Create prediction and performance objects for class i
+  pred <- prediction(predictions = svm_prob[, cls], labels = as.numeric(true_labels == cls))
+  perf <- performance(pred, "tpr", "fpr")
+  
+  plot(perf, add = TRUE, col = colors[i], lwd = 2)
+}
+
+abline(a = 0, b = 1, col = "gray", lty = 2)
+legend("bottomright", legend = classes, col = colors, lty = 1, lwd = 2, bty = "n")
+
+
+```
+
+
+
+###3.1.5 SMOTE and merge High and Med (binary SVM)
+```{r}
+# Step 1: Combine features and label
+df_knn4 <- cbind(Risk.Rating = financial_df_cleaned$Risk.Rating, financial_encoded_df)
+
+# Step 2: Convert label to factor and integer for SMOTE
+df_knn4$Risk.Rating <- as.factor(df_knn4$Risk.Rating)
+df_knn4$Risk.Rating <- as.integer(df_knn4$Risk.Rating)  # SMOTE requires numeric labels
+
+# Step 3: Apply SMOTE
+smote_result4 <- SMOTE(X = df_knn4[,-1], target = df_knn4$Risk.Rating, K = 5 , dup_size = 2)
+
+# Step 4: Extract data
+df_balanced_smote4 <- smote_result4$data
+colnames(df_balanced_smote4)[ncol(df_balanced_smote4)] <- "Risk.Rating"
+df_balanced_smote4$Risk.Rating <- factor(df_balanced_smote4$Risk.Rating,
+                                         labels = levels(financial_df_cleaned$Risk.Rating))
+
+# Check class distribution
+table(df_balanced_smote4$Risk.Rating)
+
+# Convert to binary: "Low" vs "MedHigh"
+df_binary <- df_balanced_smote4 %>%
+  mutate(Risk.Rating = ifelse(Risk.Rating == "Low", "Low", "MedHigh")) %>%
+  mutate(Risk.Rating = factor(Risk.Rating))
+
+# Check new class distribution
+table(df_binary$Risk.Rating)
+
+# Normalize features
+df_binary[, -ncol(df_binary)] <- as.data.frame(lapply(df_binary[, -ncol(df_binary)], MinMax))
+
+# Train/Test split
+set.seed(1996)
+train_idx <- sample(nrow(df_binary), 0.7 * nrow(df_binary))
+train_data <- df_binary[train_idx, ]
+test_data <- df_binary[-train_idx, ]
+
+# Clean variable names for formula
+names(train_data) <- make.names(names(train_data))
+names(test_data) <- make.names(names(test_data))
+
+# Create formula
+svm_formula <- reformulate(names(train_data[, -ncol(train_data)]), response = "Risk.Rating")
+
+# Train binary SVM model
+svm_model_binary <- ksvm(svm_formula, data = train_data, kernel = "rbfdot", C = 1)
+
+# Predict and evaluate
+svm_pred <- predict(svm_model_binary, test_data[, -ncol(test_data)])
+confusionMatrix(svm_pred, test_data$Risk.Rating)
+
+# Ensure factor levels match
+svm_pred <- factor(svm_pred, levels = levels(test_data$Risk.Rating))
+truth <- test_data$Risk.Rating
+
+# List of classes
+classes <- levels(truth)
+
+# Compute precision, recall, and F1 score for each class
+for (cls in classes) {
+  cat(paste0("\nClass: ", cls, "\n"))
+  precision <- Precision(y_pred = svm_pred, y_true = truth, positive = cls)
+  recall <- Recall(y_pred = svm_pred, y_true = truth, positive = cls)
+  f1 <- F1_Score(y_pred = svm_pred, y_true = truth, positive = cls)
+  
+  cat(paste("  Precision:", round(precision, 4), "\n"))
+  cat(paste("  Recall:   ", round(recall, 4), "\n"))
+  cat(paste("  F1 Score: ", round(f1, 4), "\n"))
+}
+
+
+```
+
+
+Show ROC Curve
+
+
+```{r}
+train_data$Risk.Rating <- as.factor(train_data$Risk.Rating)
+test_data$Risk.Rating  <- as.factor(test_data$Risk.Rating)
+
+svm_model_rbf_prob <- ksvm(
+  svm_formula,
+  data = train_data,
+  kernel = "rbfdot",
+  C = 1,
+  prob.model = TRUE
+)
+
+# Use model.frame to ensure column compatibility with the model
+test_features <- model.frame(svm_formula, data = test_data)
+
+# Get probability matrix for each class
+svm_prob <- predict(svm_model_rbf_prob, newdata = test_features, type = "probabilities")
+
+# Initial inspection
+head(svm_prob)
+
+true_labels <- test_data$Risk.Rating
+classes <- levels(true_labels)
+colors <- c("red", "blue")
+
+# Start plot
+plot(NULL, xlim = c(0,1), ylim = c(0,1), xlab = "False Positive Rate", ylab = "True Positive Rate",
+     main = "SVM ROC Curve - Merge Class")
+
+# Plot ROC curve for each class
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  
+  # Create prediction and performance object for class i
+  pred <- prediction(predictions = svm_prob[, cls], labels = as.numeric(true_labels == cls))
+  perf <- performance(pred, "tpr", "fpr")
+  
+  plot(perf, add = TRUE, col = colors[i], lwd = 2)
+}
+
+abline(a = 0, b = 1, col = "gray", lty = 2)
+legend("bottomright", legend = classes, col = colors, lty = 1, lwd = 2, bty = "n")
+
+```
+
+#SVM +CrossValidation + Tuning
+
+```{r}
+
+
+# Step 1: Combine features and label
+df_knn <- cbind(Risk.Rating = financial_df_cleaned$Risk.Rating, financial_encoded_df)
+
+# Step 2: Convert label to factor and integer for SMOTE
+df_knn$Risk.Rating <- as.factor(df_knn$Risk.Rating)
+df_knn$Risk.Rating <- as.integer(df_knn$Risk.Rating)
+
+# Step 3: Apply SMOTE
+smote_result <- SMOTE(X = df_knn[,-1], target = df_knn$Risk.Rating, K = 5 , dup_size = 5)
+
+# Step 4: Second round of SMOTE
+df_balanced_smote <- smote_result$data
+colnames(df_balanced_smote)[ncol(df_balanced_smote)] <- "Risk.Rating"
+df_balanced_smote$Risk.Rating <- as.integer(df_balanced_smote$Risk.Rating)
+
+smote_result_2 <- SMOTE(X = df_balanced_smote[,-ncol(df_balanced_smote)],
+                        target = df_balanced_smote$Risk.Rating,
+                        K = 5, dup_size = 1)
+
+df_balanced_smote_2 <- smote_result_2$data
+colnames(df_balanced_smote_2)[ncol(df_balanced_smote_2)] <- "Risk.Rating"
+df_balanced_smote_2$Risk.Rating <- factor(df_balanced_smote_2$Risk.Rating,
+                                          labels = levels(financial_df_cleaned$Risk.Rating))
+
+# Step 5: Normalize features
+df_balanced_smote_2[,-ncol(df_balanced_smote_2)] <- as.data.frame(
+  lapply(df_balanced_smote_2[,-ncol(df_balanced_smote_2)], MinMax)
+)
+
+# Step 6: Train/Test split
+set.seed(123)
+train_idx <- sample(nrow(df_balanced_smote_2), 0.7 * nrow(df_balanced_smote_2))
+train_data <- df_balanced_smote_2[train_idx, ]
+test_data <- df_balanced_smote_2[-train_idx, ]
+
+# Step 7: Cross-Validated Grid Search for Tuned KSVM
+X_train <- train_data[, -ncol(train_data)]
+y_train <- train_data$Risk.Rating
+X_test <- test_data[, -ncol(test_data)]
+y_test <- test_data$Risk.Rating
+
+C_values <- c(0.1, 1, 10)
+sigma_values <- c(0.01, 0.05, 0.1)
+
+folds <- createFolds(y_train, k = 5)
+
+best_acc <- 0
+best_model <- NULL
+best_C <- NA
+best_sigma <- NA
+
+for (C_val in C_values) {
+  for (sigma_val in sigma_values) {
+    accs <- c()
+    
+    for (fold in folds) {
+      X_tr <- X_train[-fold, ]
+      y_tr <- y_train[-fold]
+      X_val <- X_train[fold, ]
+      y_val <- y_train[fold]
+      
+      model <- ksvm(
+        x = as.matrix(X_tr),
+        y = y_tr,
+        type = "C-svc",
+        kernel = "rbfdot",
+        C = C_val,
+        kpar = list(sigma = sigma_val),
+        scaled = TRUE
+      )
+      
+      pred <- predict(model, as.matrix(X_val))
+      accs <- c(accs, mean(pred == y_val))
+    }
+    
+    mean_acc <- mean(accs)
+    cat(sprintf("C=%.2f, sigma=%.3f --> CV Accuracy=%.4f\n", C_val, sigma_val, mean_acc))
+    
+    if (mean_acc > best_acc) {
+      best_acc <- mean_acc
+      best_model <- model
+      best_C <- C_val
+      best_sigma <- sigma_val
+    }
+  }
+}
+
+cat(sprintf("Best Model: C=%.2f, sigma=%.3f with CV Accuracy=%.4f\n", best_C, best_sigma, best_acc))
+
+# Step 8: Final prediction on test set
+svm_pred <- predict(best_model, as.matrix(X_test))
+svm_pred <- factor(svm_pred, levels = levels(y_test))
+truth <- y_test
+
+# Step 9: Evaluation
+confusionMatrix(svm_pred, truth)
+
+# Per-class metrics
+classes <- levels(truth)
+for (cls in classes) {
+  cat(paste0("\nClass: ", cls, "\n"))
+  precision <- Precision(y_pred = svm_pred, y_true = truth, positive = cls)
+  recall <- Recall(y_pred = svm_pred, y_true = truth, positive = cls)
+  f1 <- F1_Score(y_pred = svm_pred, y_true = truth, positive = cls)
+  
+  cat(paste("  Precision:", round(precision, 4), "\n"))
+  cat(paste("  Recall:   ", round(recall, 4), "\n"))
+  cat(paste("  F1 Score: ", round(f1, 4), "\n"))
+}
+
+```
+
+
+```{r}
+# Retrain the best SVM model with probability estimation enabled
+svm_model_prob <- ksvm(
+  x = as.matrix(X_train),
+  y = y_train,
+  type = "C-svc",
+  kernel = "rbfdot",
+  C = best_C,
+  kpar = list(sigma = best_sigma),
+  prob.model = TRUE,
+  scaled = TRUE
+)
+
+# Predict class probabilities on the test set
+svm_prob <- predict(svm_model_prob, as.matrix(X_test), type = "probabilities")
+
+# True labels and class levels
+true_labels <- y_test
+classes <- levels(true_labels)
+colors <- c("red", "blue", "darkgreen")  # Assign a color to each class
+
+# Plot empty ROC canvas
+plot(NULL, xlim = c(0,1), ylim = c(0,1),
+     xlab = "False Positive Rate", ylab = "True Positive Rate",
+     main = "Tuned SVM ROC Curve")
+
+# Plot ROC curve for each class (one-vs-rest)
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  binary_labels <- as.numeric(true_labels == cls)
+  
+  pred <- prediction(predictions = svm_prob[, cls], labels = binary_labels)
+  perf <- performance(pred, "tpr", "fpr")
+  
+  plot(perf, add = TRUE, col = colors[i], lwd = 2)
+}
+
+# Add diagonal reference line
+abline(a = 0, b = 1, col = "gray", lty = 2)
+
+# Add legend
+legend("bottomright", legend = classes, col = colors, lty = 1, lwd = 2, bty = "n")
+
+# Calculate and print AUC for each class
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  binary_labels <- as.numeric(true_labels == cls)
+  pred <- prediction(predictions = svm_prob[, cls], labels = binary_labels)
+  auc <- performance(pred, "auc")@y.values[[1]]
+  cat(paste0("AUC for class ", cls, ": ", round(auc, 4), "\n"))
+}
+
+
+```
+
+
+## 3.2 XGboost
+
+Assumption: Using df_balanced_smote_2 (after two rounds of SMOTE)
+
+### Data Preparation
+```{r}
+
+# Ensure the target is a factor
+df_balanced_smote_2$Risk.Rating <- as.factor(df_balanced_smote_2$Risk.Rating)
+
+# Split the data (if not already done)
+set.seed(1996)
+train_idx <- sample(nrow(df_balanced_smote_2), 0.7 * nrow(df_balanced_smote_2))
+train_data <- df_balanced_smote_2[train_idx, ]
+test_data <- df_balanced_smote_2[-train_idx, ]
+
+
+```
+### Define Formula and Training Control
+```{r}
+xgb_formula <- Risk.Rating ~ .
+
+ctrl <- trainControl(
+  method = "cv", number = 5,
+  classProbs = TRUE,
+  summaryFunction = multiClassSummary,
+  allowParallel = TRUE
+)
+
+```
+
+### Train XGBoost Model
+
+```{r}
+set.seed(123)
+
+xgb_model <- train(
+  xgb_formula,
+  data = train_data,
+  method = "xgbTree",
+  trControl = ctrl,
+  tuneLength = 5,
+  metric = "Accuracy"
+)
+
+```
+### Model Evaluation
+```{r}
+
+# Predictions
+xgb_pred <- predict(xgb_model, newdata = test_data)
+
+# Confusion Matrix
+confusionMatrix(xgb_pred, test_data$Risk.Rating)
+
+# Precision / Recall / F1-Score
+
+
+truth <- test_data$Risk.Rating
+for (cls in levels(truth)) {
+  cat(paste0("\nClass: ", cls, "\n"))
+  precision <- Precision(y_pred = xgb_pred, y_true = truth, positive = cls)
+  recall <- Recall(y_pred = xgb_pred, y_true = truth, positive = cls)
+  f1 <- F1_Score(y_pred = xgb_pred, y_true = truth, positive = cls)
+  
+  cat(paste("  Precision:", round(precision, 4), "\n"))
+  cat(paste("  Recall:   ", round(recall, 4), "\n"))
+  cat(paste("  F1 Score: ", round(f1, 4), "\n"))
+}
+
+
+```
+
+Show ROC Curve
+
+
+```{r}
+
+# Predict class probabilities
+xgb_prob <- predict(xgb_model, newdata = test_data, type = "prob")
+head(xgb_prob)  # Should contain 3 columns: High, Low, Medium
+
+true_labels <- test_data$Risk.Rating
+classes <- levels(true_labels)
+colors <- c("red", "blue", "darkgreen")
+
+# Create empty plot
+plot(NULL, xlim = c(0, 1), ylim = c(0, 1), xlab = "False Positive Rate", ylab = "True Positive Rate",
+     main = "XGBoost ROC Curve - One vs Rest")
+
+# Loop through each class
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  
+  # One-vs-Rest binary labels
+  binary_labels <- as.numeric(true_labels == cls)
+  
+  # Get probabilities for class i
+  pred <- prediction(predictions = xgb_prob[, cls], labels = binary_labels)
+  perf <- performance(pred, "tpr", "fpr")
+  
+  # Plot curve
+  plot(perf, add = TRUE, col = colors[i], lwd = 2)
+}
+
+abline(a = 0, b = 1, col = "gray", lty = 2)
+legend("bottomright", legend = classes, col = colors, lty = 1, lwd = 2, bty = "n")
+
+
+```
+
+Calculate AUC
+```{r}
+for (i in seq_along(classes)) {
+  cls <- classes[i]
+  binary_labels <- as.numeric(true_labels == cls)
+  pred <- prediction(xgb_prob[, cls], binary_labels)
+  auc <- performance(pred, "auc")@y.values[[1]]
+  cat(paste0("AUC for class ", cls, ": ", round(auc, 4), "\n"))
+}
+```
